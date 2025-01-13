@@ -1,3 +1,6 @@
+main
+*.log
+
 # Prerequisites
 *.d
 
