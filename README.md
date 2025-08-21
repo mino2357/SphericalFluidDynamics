@@ -6,55 +6,55 @@
 
 速度ベクトル $u = (u^\alpha, u^\beta)$ と密度 $\rho$ を考えます。球半径を $R$ とすると計量テンソルは
 
-$$
- g = \begin{pmatrix}
- R^2 \cos^2\beta & 0 \\
- 0 & R^2
- \end{pmatrix}
-$$
+```math
+g = \begin{pmatrix}
+R^2 \cos^2\beta & 0 \\
+0 & R^2
+\end{pmatrix}
+```
 
 非ゼロクリストッフェル記号は
 
-$$
+```math
 \Gamma^\alpha_{\alpha\beta} = \Gamma^\alpha_{\beta\alpha} = -\tan\beta,\qquad
 \Gamma^\beta_{\alpha\alpha} = -\cos\beta\sin\beta.
-$$
+```
 
 これを用いた保存方程式は
 
-$$
+```math
 \frac{\partial \rho}{\partial t}
-+ \frac{1}{R}\left(
+\quad + \frac{1}{R}\left(
  \frac{\partial (\rho u^\alpha)}{\partial \alpha}
  + \frac{\partial (\rho u^\beta)}{\partial \beta}
-\right) = 0,
-$$
+\right) = 0
+```
 
-$$
+```math
 \frac{\partial u^\alpha}{\partial t}
-+ u^\alpha\frac{\partial u^\alpha}{\partial \alpha}
-+ u^\beta\frac{\partial u^\alpha}{\partial \beta}
-- 2\tan\beta\, u^\alpha u^\beta
-= -\frac{1}{\rho R^2\cos^2\beta}\frac{\partial p}{\partial \alpha}
-  + \frac{\nu}{R^2}\left(
+ + u^\alpha\frac{\partial u^\alpha}{\partial \alpha}
+ + u^\beta\frac{\partial u^\alpha}{\partial \beta}
+ - 2\tan\beta\, u^\alpha u^\beta
+ = -\frac{1}{\rho R^2\cos^2\beta}\frac{\partial p}{\partial \alpha}
+ + \frac{\nu}{R^2}\left(
      \frac{1}{\cos^2\beta}\frac{\partial^2 u^\alpha}{\partial \alpha^2}
      - \tan\beta\frac{\partial u^\alpha}{\partial \beta}
      + \frac{\partial^2 u^\alpha}{\partial \beta^2}
-  \right),
-$$
+  \right)
+```
 
-$$
+```math
 \frac{\partial u^\beta}{\partial t}
-+ u^\alpha\frac{\partial u^\beta}{\partial \alpha}
-+ u^\beta\frac{\partial u^\beta}{\partial \beta}
-- \cos\beta\sin\beta\, u^\alpha u^\alpha
-= -\frac{1}{\rho R^2}\frac{\partial p}{\partial \beta}
-  + \frac{\nu}{R^2}\left(
+ + u^\alpha\frac{\partial u^\beta}{\partial \alpha}
+ + u^\beta\frac{\partial u^\beta}{\partial \beta}
+ - \cos\beta\sin\beta\, u^\alpha u^\alpha
+ = -\frac{1}{\rho R^2}\frac{\partial p}{\partial \beta}
+ + \frac{\nu}{R^2}\left(
      \frac{1}{\cos^2\beta}\frac{\partial^2 u^\beta}{\partial \alpha^2}
      - \tan\beta\frac{\partial u^\beta}{\partial \beta}
      + \frac{\partial^2 u^\beta}{\partial \beta^2}
-  \right).
-$$
+  \right)
+```
 
 状態方程式は $p(\rho) = k\rho$ を用います。
 
