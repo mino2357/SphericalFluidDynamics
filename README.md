@@ -1,62 +1,37 @@
 # SphericalFluidDynamics
 
-実験的な球面上の流体シミュレータです。経度 $\alpha$、緯度 $\beta$ で定義された格子を用いて圧縮性流体の運動方程式を単純な陽解法で積分します。極付近は特異性を避けるため除外しています。
+実験的な球面上の流体シミュレータです。経度 \( \lambda \) と緯度 \( \varphi \) を用いた球面座標で圧縮性流体の運動方程式を単純な陽解法で積分します。極付近は特異性を避けるため除外しています。
 
 ## モデル
 
-速度ベクトル $u = (u^\alpha, u^\beta)$ と密度 $\rho$ を考えます。球半径を $R$ とすると計量テンソルは
-
+球半径を \(R\) とすると，線素は
 ```math
-g = \begin{pmatrix}
-R^2 \cos^2\beta & 0 \\
-0 & R^2
-\end{pmatrix}
+ds^2 = R^2\cos^2\varphi\,d\lambda^2 + R^2\,d\varphi^2
+```
+となり，この座標系における非ゼロのクリストッフェル記号は
+```math
+\Gamma^\lambda_{\lambda\varphi} = \Gamma^\lambda_{\varphi\lambda} = -\tan\varphi,\qquad
+\Gamma^\varphi_{\lambda\lambda} = \sin\varphi\cos\varphi.
 ```
 
-非ゼロクリストッフェル記号は
+速度ベクトルを \( \boldsymbol{u} = u^\lambda\,\partial_\lambda + u^\varphi\,\partial_\varphi \) とし，密度を \( \rho \) とすると，保存方程式は以下の通りである。
 
+連続の式：
 ```math
-\Gamma^\alpha_{\alpha\beta} = \Gamma^\alpha_{\beta\alpha} = -\tan\beta,\qquad
-\Gamma^\beta_{\alpha\alpha} = -\cos\beta\sin\beta.
+\partial_t \rho + \frac{1}{R\cos\varphi}\left[\partial_\lambda(\rho u^\lambda \cos\varphi) + \partial_\varphi(\rho u^\varphi)\right] = 0
 ```
 
-これを用いた保存方程式は
-
+経度方向の運動方程式：
 ```math
-\frac{\partial \rho}{\partial t}
-\quad + \frac{1}{R}\left(
- \frac{\partial (\rho u^\alpha)}{\partial \alpha}
- + \frac{\partial (\rho u^\beta)}{\partial \beta}
-\right) = 0
+\partial_t u^\lambda + u^\lambda\partial_\lambda u^\lambda + u^\varphi\partial_\varphi u^\lambda - 2\tan\varphi\,u^\lambda u^\varphi = -\frac{1}{\rho R^2\cos^2\varphi}\partial_\lambda p + \frac{\nu}{R^2}\left[\frac{1}{\cos^2\varphi}\partial_\lambda^2 u^\lambda - \tan\varphi\,\partial_\varphi u^\lambda + \partial_\varphi^2 u^\lambda\right]
 ```
 
+緯度方向の運動方程式：
 ```math
-\frac{\partial u^\alpha}{\partial t}
- + u^\alpha\frac{\partial u^\alpha}{\partial \alpha}
- + u^\beta\frac{\partial u^\alpha}{\partial \beta}
- - 2\tan\beta\, u^\alpha u^\beta
- = -\frac{1}{\rho R^2\cos^2\beta}\frac{\partial p}{\partial \alpha}
- + \frac{\nu}{R^2}\left(
-     \frac{1}{\cos^2\beta}\frac{\partial^2 u^\alpha}{\partial \alpha^2}
-     - \tan\beta\frac{\partial u^\alpha}{\partial \beta}
-     + \frac{\partial^2 u^\alpha}{\partial \beta^2}
-  \right)
+\partial_t u^\varphi + u^\lambda\partial_\lambda u^\varphi + u^\varphi\partial_\varphi u^\varphi + \cos\varphi\sin\varphi\,(u^\lambda)^2 = -\frac{1}{\rho R^2}\partial_\varphi p + \frac{\nu}{R^2}\left[\frac{1}{\cos^2\varphi}\partial_\lambda^2 u^\varphi - \tan\varphi\,\partial_\varphi u^\varphi + \partial_\varphi^2 u^\varphi\right]
 ```
 
-```math
-\frac{\partial u^\beta}{\partial t}
- + u^\alpha\frac{\partial u^\beta}{\partial \alpha}
- + u^\beta\frac{\partial u^\beta}{\partial \beta}
- - \cos\beta\sin\beta\, u^\alpha u^\alpha
- = -\frac{1}{\rho R^2}\frac{\partial p}{\partial \beta}
- + \frac{\nu}{R^2}\left(
-     \frac{1}{\cos^2\beta}\frac{\partial^2 u^\beta}{\partial \alpha^2}
-     - \tan\beta\frac{\partial u^\beta}{\partial \beta}
-     + \frac{\partial^2 u^\beta}{\partial \beta^2}
-  \right)
-```
-
-状態方程式は $p(\rho) = k\rho$ を用います。
+状態方程式には \( p(\rho) = k\rho \) を用いる。
 
 ## ビルドと実行
 
@@ -65,5 +40,4 @@ make
 ./main > field.dat
 ```
 
-標準エラー出力にはステップ数と最大速度が出力され、標準出力には $(\alpha,\beta)$ 座標と流速・密度が出力されます。
-
+標準エラーにはステップ数と最大速度が出力され，標準出力には \((\lambda,\varphi)\) と流速・密度が出力される。
