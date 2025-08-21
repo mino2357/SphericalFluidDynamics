@@ -1,237 +1,232 @@
-//
-// Flow in a sphere.
-// Description: This is a simple code to calculate the velocity field in a sphere.
-// 0 <= longitude <= 2pi, - limit_latitudes <= latitude <= limit_latitudes
-//
-// gnuplot: plot "log.dat" u 1:2:(0.1*$3):(0.1*$4) w vector
-// gnuplot> set xr [0:2*pi]
-// gnuplot> set yr [-0.25*pi:0.25*pi]
-
-#include <iostream>
-#include <vector>
 #include <cmath>
 #include <iomanip>
+#include <iostream>
+#include <vector>
 
-constexpr double limit_latitudes = 75.0 * M_PI / 180.0;
-constexpr double R = 4.0;
-constexpr double T = 1.0;
+// Simple explicit solver for compressible flow on a sphere.
+// The grid uses longitude (alpha) and latitude (beta) coordinates.
+// Polar caps are removed to avoid singularities at the poles.
 
-class FlowInSphere
-{
-public:
-    double radius = 1.0;
-    double nu = 0.001;
-    double delta_t = 0.00001;
-    double delta_longitudes;
-    double delta_latitudes;
-    size_t N_longitudes;
-    size_t N_latitules;
-    std::vector<std::vector<double>> rho;
-    std::vector<std::vector<double>> u_longitudes;
-    std::vector<std::vector<double>> u_latitudes;
-    FlowInSphere(size_t n, size_t m);
-    void setVelocity();
-    void printVelocity();
-    // advection
-    void step_advection_eq();
-    // pressure
-    double pressure(double);
-    // max_velocity
-    double max_velocity();
+namespace {
+constexpr double LAT_LIMIT = 75.0 * M_PI / 180.0;  // maximum |latitude|
+constexpr double GAS_R = 4.0;                      // gas constant
+constexpr double TEMPERATURE = 1.0;                // temperature
+}  // namespace
+
+struct Field {
+    std::size_t nlon, nlat;
+    std::vector<double> data;
+    Field() = default;
+    Field(std::size_t lon, std::size_t lat, double init = 0.0)
+        : nlon(lon), nlat(lat), data(lon * lat, init) {}
+    double &operator()(std::size_t i, std::size_t j) {
+        return data[i * nlat + j];
+    }
+    double operator()(std::size_t i, std::size_t j) const {
+        return data[i * nlat + j];
+    }
 };
 
-double FlowInSphere::max_velocity()
-{
-    double max = 0.0;
-    for (size_t i = 0; i < N_longitudes; i++)
-    {
-        for (size_t j = 0; j < N_latitules; j++)
-        {
-            double v = sqrt(u_longitudes[i][j]*u_longitudes[i][j] + u_latitudes[i][j]*u_latitudes[i][j]);
-            if (v > max)
-            {
-                max = v;
+class SphericalFluidSolver {
+  public:
+    SphericalFluidSolver(std::size_t nlon, std::size_t nlat, double radius,
+                         double viscosity, double dt);
+
+    void initializeSolidRotation(double angular_velocity);
+    void step();
+    double maxSpeed() const;
+    void dump(std::ostream &os) const;
+
+  private:
+    std::size_t nlon_;  // including ghost cells
+    std::size_t nlat_;
+    double radius_;
+    double nu_;
+    double dt_;
+    double dlon_;
+    double dlat_;
+
+    Field rho_;
+    Field u_lon_;
+    Field u_lat_;
+
+    double pressure(double rho) const { return rho * GAS_R * TEMPERATURE; }
+    void applyBoundary();
+};
+
+SphericalFluidSolver::SphericalFluidSolver(std::size_t nlon, std::size_t nlat,
+                                           double radius, double viscosity,
+                                           double dt)
+    : nlon_(nlon), nlat_(nlat), radius_(radius), nu_(viscosity), dt_(dt) {
+    dlon_ = 2.0 * M_PI / (nlon_ - 2);
+    dlat_ = 2.0 * LAT_LIMIT / (nlat_ - 2);
+    rho_ = Field(nlon_, nlat_, 1.0);
+    u_lon_ = Field(nlon_, nlat_, 0.0);
+    u_lat_ = Field(nlon_, nlat_, 0.0);
+}
+
+void SphericalFluidSolver::initializeSolidRotation(double angular_velocity) {
+    for (std::size_t i = 0; i < nlon_; ++i) {
+        for (std::size_t j = 0; j < nlat_; ++j) {
+            double beta = -LAT_LIMIT + dlat_ * j;
+            u_lon_(i, j) = angular_velocity * std::cos(beta);
+            u_lat_(i, j) = 0.0;
+            rho_(i, j) = 1.0;
+        }
+    }
+    applyBoundary();
+}
+
+void SphericalFluidSolver::applyBoundary() {
+    // Periodic in longitude
+    for (std::size_t j = 0; j < nlat_; ++j) {
+        u_lon_(0, j) = u_lon_(nlon_ - 2, j);
+        u_lon_(nlon_ - 1, j) = u_lon_(1, j);
+        u_lat_(0, j) = u_lat_(nlon_ - 2, j);
+        u_lat_(nlon_ - 1, j) = u_lat_(1, j);
+        rho_(0, j) = rho_(nlon_ - 2, j);
+        rho_(nlon_ - 1, j) = rho_(1, j);
+    }
+    // Simple Neumann condition near excluded poles
+    for (std::size_t i = 0; i < nlon_; ++i) {
+        u_lon_(i, 0) = u_lon_(i, 1);
+        u_lon_(i, nlat_ - 1) = u_lon_(i, nlat_ - 2);
+        u_lat_(i, 0) = 0.0;
+        u_lat_(i, nlat_ - 1) = 0.0;
+        rho_(i, 0) = rho_(i, 1);
+        rho_(i, nlat_ - 1) = rho_(i, nlat_ - 2);
+    }
+}
+
+void SphericalFluidSolver::step() {
+    Field u_lon_new(nlon_, nlat_);
+    Field u_lat_new(nlon_, nlat_);
+    Field rho_new(nlon_, nlat_);
+
+    for (std::size_t i = 1; i < nlon_ - 1; ++i) {
+        for (std::size_t j = 1; j < nlat_ - 1; ++j) {
+            double beta = -LAT_LIMIT + dlat_ * j;
+
+            double long_long, long_lati, lati_long, lati_lati;
+            if (u_lon_(i, j) > 0) {
+                long_long =
+                    u_lon_(i, j) * (u_lon_(i, j) - u_lon_(i - 1, j)) / dlon_;
+                long_lati =
+                    u_lon_(i, j) * (u_lat_(i, j) - u_lat_(i - 1, j)) / dlon_;
+            } else {
+                long_long =
+                    u_lon_(i, j) * (u_lon_(i + 1, j) - u_lon_(i, j)) / dlon_;
+                long_lati =
+                    u_lon_(i, j) * (u_lat_(i + 1, j) - u_lat_(i, j)) / dlon_;
             }
+            if (u_lat_(i, j) > 0) {
+                lati_long =
+                    u_lat_(i, j) * (u_lon_(i, j) - u_lon_(i, j - 1)) / dlat_;
+                lati_lati =
+                    u_lat_(i, j) * (u_lat_(i, j) - u_lat_(i, j - 1)) / dlat_;
+            } else {
+                lati_long =
+                    u_lat_(i, j) * (u_lon_(i, j + 1) - u_lon_(i, j)) / dlat_;
+                lati_lati =
+                    u_lat_(i, j) * (u_lat_(i, j + 1) - u_lat_(i, j)) / dlat_;
+            }
+
+            u_lon_new(i, j) =
+                u_lon_(i, j) - dt_ * (long_long + lati_long)
+                - dt_ * 2.0 * std::tan(beta) * u_lon_(i, j) * u_lat_(i, j)
+                - dt_ * (pressure(rho_(i + 1, j)) - pressure(rho_(i - 1, j))) /
+                      (2.0 * dlon_ * rho_(i, j) * radius_ * radius_ *
+                       std::cos(beta) * std::cos(beta))
+                + dt_ * nu_ / (radius_ * radius_) *
+                      ((1.0 / (std::cos(beta) * std::cos(beta))) *
+                           (u_lon_(i - 1, j) - 2.0 * u_lon_(i, j) +
+                            u_lon_(i + 1, j)) /
+                           (dlon_ * dlon_)
+                       - std::tan(beta) *
+                             (u_lon_(i, j + 1) - u_lon_(i, j - 1)) /
+                             (2.0 * dlat_)
+                       + (u_lon_(i, j - 1) - 2.0 * u_lon_(i, j) +
+                          u_lon_(i, j + 1)) /
+                             (dlat_ * dlat_));
+
+            u_lat_new(i, j) =
+                u_lat_(i, j) - dt_ * (long_lati + lati_lati)
+                - dt_ * std::cos(beta) * std::sin(beta) *
+                      u_lon_(i, j) * u_lon_(i, j)
+                - dt_ * (pressure(rho_(i, j + 1)) - pressure(rho_(i, j - 1))) /
+                      (2.0 * dlat_ * rho_(i, j) * radius_ * radius_)
+                + dt_ * nu_ / (radius_ * radius_) *
+                      ((1.0 / (std::cos(beta) * std::cos(beta))) *
+                           (u_lat_(i - 1, j) - 2.0 * u_lat_(i, j) +
+                            u_lat_(i + 1, j)) /
+                           (dlon_ * dlon_)
+                       - std::tan(beta) *
+                             (u_lat_(i, j + 1) - u_lat_(i, j - 1)) /
+                             (2.0 * dlat_)
+                       + (u_lat_(i, j - 1) - 2.0 * u_lat_(i, j) +
+                          u_lat_(i, j + 1)) /
+                             (dlat_ * dlat_));
+
+            rho_new(i, j) =
+                rho_(i, j) -
+                dt_ * (1.0 / radius_) *
+                    ((rho_(i + 1, j) * u_lon_(i + 1, j) -
+                      rho_(i - 1, j) * u_lon_(i - 1, j)) /
+                         (2.0 * dlon_)+
+                     (rho_(i, j + 1) * u_lat_(i, j + 1) -
+                      rho_(i, j - 1) * u_lat_(i, j - 1)) /
+                         (2.0 * dlat_));
+        }
+    }
+
+    u_lon_ = std::move(u_lon_new);
+    u_lat_ = std::move(u_lat_new);
+    rho_ = std::move(rho_new);
+    applyBoundary();
+}
+
+double SphericalFluidSolver::maxSpeed() const {
+    double max = 0.0;
+    for (std::size_t i = 0; i < nlon_; ++i) {
+        for (std::size_t j = 0; j < nlat_; ++j) {
+            double v =
+                std::sqrt(u_lon_(i, j) * u_lon_(i, j) +
+                          u_lat_(i, j) * u_lat_(i, j));
+            max = std::max(max, v);
         }
     }
     return max;
 }
 
-double FlowInSphere::pressure(double rho)
-{
-    return rho * R * T;
-}
-
-FlowInSphere::FlowInSphere(size_t n, size_t m)
-{
-    delta_longitudes = 2.0 * M_PI / (n - 2);
-    delta_latitudes = 2.0 * limit_latitudes / (m - 2);
-    N_longitudes = n;
-    N_latitules = m;
-    u_longitudes.resize(n);
-    u_latitudes.resize(n);
-    rho.resize(n);
-    for (size_t i = 0; i < n; i++)
-    {
-        u_longitudes[i].resize(m);
-        u_latitudes[i].resize(m);
-        rho[i].resize(m);
-    }
-    for (size_t i = 0; i < n; i++)
-    {
-        for (size_t j = 0; j < m; j++)
-        {
-            u_longitudes[i][j] = 0.0;
-            u_latitudes[i][j] = 0.0;
-            rho[i][j] = 1.0;
+void SphericalFluidSolver::dump(std::ostream &os) const {
+    for (std::size_t i = 0; i < nlon_; ++i) {
+        for (std::size_t j = 0; j < nlat_; ++j) {
+            double alpha = 2.0 * M_PI * i / (nlon_ - 2);
+            double beta = -LAT_LIMIT + dlat_ * j;
+            os << alpha * 180.0 / M_PI << ' ' << beta * 180.0 / M_PI << ' '
+               << u_lon_(i, j) << ' ' << u_lat_(i, j) << ' ' << rho_(i, j)
+               << ' '
+               << std::sqrt(u_lon_(i, j) * u_lon_(i, j) +
+                             u_lat_(i, j) * u_lat_(i, j))
+               << '\n';
         }
+        os << '\n';
     }
 }
 
-void FlowInSphere::setVelocity()
-{
-    for (size_t i = 0; i < N_longitudes; i++)
-    {
-        for (size_t j = 0; j < N_latitules; j++)
-        {
-            double alpha = 2.0 * M_PI * i / (N_longitudes - 1);
-            double beta = - limit_latitudes + (2.0 * limit_latitudes) * j / (N_latitules - 1);
-            u_longitudes[i][j] = 0.0;
-            u_latitudes[i][j] = 0.0;
-            if (1.0 <= alpha && alpha <= 1.5 && - limit_latitudes / 4.0 <= beta && beta <= limit_latitudes / 4.0)
-            {
-                u_longitudes[i][j] = 0.0e-1;
-                u_latitudes[i][j] = 0.0;
-            }
-            if (0.0 <= beta)
-            {
-                u_longitudes[i][j] = 0.0e-1;
-                u_latitudes[i][j] = 0.0;
-            }
-            if (beta <= -0.0)
-            {
-                u_longitudes[i][j] = 0.0e-1;
-                u_latitudes[i][j] = 0.0;
-            }
-        }
-    }
-}
+int main() {
+    SphericalFluidSolver solver(300, 200, 1.0, 0.001, 1.0e-5);
+    solver.initializeSolidRotation(0.1);
 
-void FlowInSphere::printVelocity()
-{
-    for (size_t i = 0; i < N_longitudes; i++)
-    {
-        for (size_t j = 0; j < N_latitules; j++)
-        {
-            double alpha = 2.0 * M_PI * i / (N_longitudes - 2);
-            double beta = - limit_latitudes + (2.0 * limit_latitudes) * j / (N_latitules - 2);
-            std::cout << alpha * 180.0 / M_PI << " " << beta * 180.0 / M_PI << " " << u_longitudes[i][j] << " " << u_latitudes[i][j]
-                        << " " << rho[i][j] << " " << sqrt(u_longitudes[i][j]*u_longitudes[i][j] + u_latitudes[i][j]*u_latitudes[i][j]) << std::endl;
+    for (int step = 0; step < 10000; ++step) {
+        solver.step();
+        if (step % 1000 == 0) {
+            std::cerr << std::fixed << std::setprecision(15) << step << ' '
+                      << solver.maxSpeed() << '\n';
         }
-        std::cout << std::endl;
     }
-}
 
-void FlowInSphere::step_advection_eq()
-{
-    // advection equation
-    auto u_longitudes_new = u_longitudes;
-    auto u_latitudes_new = u_latitudes;
-    auto rho_new = rho;
-    for (size_t i = 1; i < N_longitudes - 1; i++)
-    {
-        for (size_t j = 1; j < N_latitules - 1; j++)
-        {
-            //double alpha = 2.0 * M_PI * i / (N_longitudes - 1);
-            double beta = - limit_latitudes + (2.0 * limit_latitudes) * j / (N_latitules - 1);
-            auto long_long_long = 0.0;
-            auto long_lati_long = 0.0;
-            auto lati_long_lati = 0.0;
-            auto lati_lati_lati = 0.0;
-            if (u_longitudes[i][j] > 0)
-            {
-                long_long_long = u_longitudes[i][j] * (u_longitudes[i][j] - u_longitudes[i-1][j]) / delta_longitudes;
-                long_lati_long = u_longitudes[i][j] * (u_latitudes[i][j] - u_latitudes[i-1][j]) / delta_longitudes;
-            }
-            else
-            {
-                long_long_long = u_longitudes[i][j] * (u_longitudes[i+1][j] - u_longitudes[i][j]) / delta_longitudes;
-                long_lati_long = u_longitudes[i][j] * (u_latitudes[i+1][j] - u_latitudes[i][j]) / delta_longitudes;
-            }
-            if(u_latitudes[i][j] > 0)
-            {
-                lati_long_lati = u_latitudes[i][j] * (u_longitudes[i][j] - u_longitudes[i][j-1]) / delta_latitudes;
-                lati_lati_lati = u_latitudes[i][j] * (u_latitudes[i][j] - u_latitudes[i][j-1]) / delta_latitudes;
-            }
-            else
-            {
-                lati_long_lati = u_latitudes[i][j] * (u_longitudes[i][j+1] - u_longitudes[i][j]) / delta_latitudes;
-                lati_lati_lati = u_latitudes[i][j] * (u_latitudes[i][j+1] - u_latitudes[i][j]) / delta_latitudes;
-            }
-            u_longitudes_new[i][j] = u_longitudes[i][j] - delta_t * (long_long_long + lati_long_lati)
-                                    + delta_t * 2.0 * tan(beta) * u_latitudes[i][j] * u_latitudes[i][j]
-                                    - delta_t * (pressure(rho[i+1][j]) - pressure(rho[i-1][j])) / (2.0 * delta_longitudes * rho[i][j] * radius * radius * cos(beta) * cos(beta))
-                                    + delta_t * nu / (radius * radius) * ((1.0 / (cos(beta) * cos(beta))) * (u_longitudes[i-1][j] - 2.0 * u_longitudes[i][j] + u_longitudes[i+1][j]) / (delta_longitudes * delta_longitudes)
-                                    - tan(beta) * (u_longitudes[i][j+1] - u_longitudes[i][j-1]) / (2.0 * delta_latitudes)
-                                    + (u_longitudes[i][j-1] - 2.0 * u_longitudes[i][j] + u_longitudes[i][j+1]) / (delta_latitudes * delta_latitudes));
-            u_latitudes_new[i][j] = u_latitudes[i][j] - delta_t * (long_lati_long + lati_lati_lati)
-                                    + delta_t * cos(beta) * sin(beta) * u_latitudes[i][j] * u_latitudes[i][j]
-                                    - delta_t * (pressure(rho[i][j+1]) - pressure(rho[i][j-1])) / (2.0 * delta_latitudes * rho[i][j] * radius * radius)
-                                    + delta_t * nu / (radius * radius) * ((1.0 / (cos(beta) * cos(beta))) * (u_latitudes[i-1][j] - 2.0 * u_latitudes[i][j] + u_latitudes[i+1][j]) / (delta_longitudes * delta_longitudes)
-                                    - tan(beta) * (u_latitudes[i][j+1] - u_latitudes[i][j-1]) / (2.0 * delta_latitudes)
-                                    + (u_latitudes[i][j-1] - 2.0 * u_latitudes[i][j] + u_latitudes[i][j+1]) / (delta_latitudes * delta_latitudes));
-            rho_new[i][j] = rho[i][j] - delta_t * (1.0 / (radius * radius) * (rho[i+1][j] * u_longitudes[i+1][j] - rho[i-1][j] * u_longitudes[i-1][j]) / (2.0 * delta_longitudes)
-                                    + (rho[i][j+1] * u_latitudes[i][j+1] - rho[i][j-1] * u_latitudes[i][j-1]) / (2.0 * delta_latitudes));
-        }
-    }
-    u_longitudes = u_longitudes_new;
-    u_latitudes = u_latitudes_new;
-    rho = rho_new;
-    // boundary condition
-    for(size_t i = 0; i < N_longitudes; i++)
-    {
-        u_longitudes[i][0] = 1.0e-1; // u_longitudes[i][N_longitudes-2];
-        u_longitudes[i][N_latitules-1] = 1.0e-1; // u_longitudes[i][1];
-        u_latitudes[i][0] = 0.0; // u_latitudes[i][N_longitudes-2];
-        u_latitudes[i][N_latitules-1] = 0.0; // u_latitudes[i][1];
-        rho[i][0] = rho[i][1]; // rho[i][N_longitudes-2];
-        rho[i][N_latitules-1] = rho[i][N_latitules-2]; // rho[i][1];
-    }
-    for (size_t i = 0; i < N_longitudes; i++)
-    {
-        for (size_t j = 0; j < N_latitules; j++)
-        {
-            double alpha = 2.0 * M_PI * i / (N_longitudes - 1);
-            //double beta = - limit_latitudes + (2.0 * limit_latitudes) * j / (N_latitules - 1);
-            u_longitudes[i][0] = 0.2 * sin(2.0 * alpha); // u_longitudes[i][N_longitudes-2];
-            u_longitudes[i][N_latitules-1] = 0.2 * cos(2.0 * alpha); // u_longitudes[i][1];
-        }
-    }
-    for(size_t i = 0; i < N_latitules; i++)
-    {
-        u_longitudes[0][i] = u_longitudes[N_longitudes-2][i];
-        u_longitudes[N_longitudes-1][i] = u_longitudes[1][i];
-        u_latitudes[0][i] = u_latitudes[N_longitudes-2][i];
-        u_latitudes[N_longitudes-1][i] = u_latitudes[1][i];
-        rho[0][i] = rho[N_longitudes-2][i];
-        rho[N_longitudes-1][i] = rho[1][i];
-    }
-}
-
-int main()
-{
-    auto u = FlowInSphere(300, 200);
-    u.setVelocity();
-    //u.printVelocity();
-    //u.step_advection_eq();
-    for(auto i = 0; i < 10000000; i++)
-    {
-        u.step_advection_eq();
-        //u.printVelocity();
-        if (i % 1000 == 0){
-            std::cerr << std::fixed << std::setprecision(15) << i << " " << u.max_velocity() << std::endl;
-        }
-    }
-    u.printVelocity();
+    solver.dump(std::cout);
     return 0;
 }
+
